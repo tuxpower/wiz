@@ -1,53 +1,119 @@
+# logic: "ApplicationLoadBalancer where isPublic = 'false' and listeners contain [ protocol='HTTPS' ] should have listeners contain [ securityPolicy like 'ELBSecurityPolicy-TLS-1-2-%' or securityPolicy like 'ELBSecurityPolicy-TLS13-%' or securityPolicy like 'ELBSecurityPolicy-FS-1-2-%']",
 package wiz
 
-import data.generic.common as common_lib
 import data.generic.terraform as terraLib
+import data.generic.common as commonLib
+import future.keywords.in
 
-matches(shield, name) {
-	attribute = terraLib.getValueArrayOrObject(shield.resource_arn)
-	split(attribute,".")[1] == name
-} else {
-	attribute = terraLib.getValueArrayOrObject(shield.resource_arn)
-	target := split(attribute,"/")[1]
-	split(target,".")[1] == name
+lbResources := {"aws_lb", "aws_alb"}
+lbListenerResources := {"aws_lb_listener", "aws_alb_listener"}
+
+secureProtocols := {"HTTPS", "TLS"}
+
+sslPolicyStartsWith(ssl_policy) {
+	not startswith(ssl_policy, "ELBSecurityPolicy-FS-1-2")
+	not startswith(ssl_policy, "ELBSecurityPolicy-TLS-1-2")
+	not startswith(ssl_policy, "ELBSecurityPolicy-TLS13")
 }
 
-has_shield_advanced(name) {
-	shield := input.document[_].resource.aws_shield_protection[_]
-	matches(shield, name)
+albProtocolIsHttp(document, lbResource, lbResourceName) {
+	lbListenerResource := document.resource[lbListenerResources[idx]][lbListenerName]
+	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
+	lower(lbListenerResource.protocol) == "http"
 }
 
- 
-# policy to check cloudfront has shield protection
+albRedirectMissing(document, lbResource, lbResourceName) {
+	lbListenerResource := document.resource[lbListenerResources[idx]][lbListenerName]
+	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
+	not commonLib.valid_key(lbListenerResource.default_action, "redirect")
+}
+
+albRedirectHTTPS(document, lbResource, lbResourceName) {
+	lbListenerResource := document.resource[lbListenerResources[idx]][lbListenerName]
+	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
+	commonLib.valid_key(lbListenerResource.default_action, "redirect")
+    commonLib.valid_key(lbListenerResource.default_action.redirect, "protocol")
+    lbListenerResource.default_action.redirect.protocol == "HTTPS"
+}
+
+albInSecureProtocols(document, lbResource, lbResourceName) {
+	lbListenerResource := document.resource[lbListenerResources[i]][lbListenerName]
+	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
+	lbListenerResource.protocol in secureProtocols
+}
+
+albHasSSLPolicyDefined(document, lbResource, lbResourceName) {
+	lbListenerResource := document.resource[lbListenerResources[i]][lbListenerName]
+	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
+	commonLib.valid_key(lbListenerResource, "ssl_policy")
+}
+
+albWithUnsecureSSLPolicy(document, lbResource, lbResourceName) {
+	lbListenerResource := document.resource[lbListenerResources[i]][lbListenerName]
+	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
+	lbListenerResource.protocol in secureProtocols
+    commonLib.valid_key(lbListenerResource, "ssl_policy")
+	sslPolicyStartsWith(lbListenerResource.ssl_policy)
+    
+}
+
 WizPolicy[result] {
-	target := input.document[i].resource.aws_cloudfront_distribution[name]
-   	not has_shield_advanced(name)
-
-	result := {
-		"documentId": input.document[i].id,
-		"resourceName": terraLib.get_resource_name(target, name),
-		"searchKey": sprintf("aws_cloudfront_distribution[%s]", [name]),
-		"issueType": "MissingAttribute",
-		"keyExpectedValue": sprintf("aws_cloudfront_distribution[%s] has shield advanced associated", [name]),
-		"keyActualValue": sprintf("aws_cloudfront_distribution[%s] does not have shield advanced associated", [name]),
-		"searchLine": common_lib.build_search_line(["resource", "aws_cloudfront_distribution", name], []),
-		"resourceTags": object.get(target, "tags", {}),
+	document := input.document[i]
+	lbResource := document.resource[lbResources[lb]][lbResourceName]
+	object.get(lbResource, "load_balancer_type", "application") == "application"	
+    albProtocolIsHttp(document, lbResource, lbResourceName)
+    albRedirectMissing(document, lbResource, lbResourceName)
+	result := {  
+		"documentId": document.id,
+		"searchKey": sprintf("%s[%s]", [lbResources[lb], lbResourceName]),
+		"keyExpectedValue": "default_action.redirect.protocol' should be equal to 'HTTPS'",
+		"keyActualValue": "default_action.redirect' is missing",
+		"resourceTags": object.get(lbResource, "tags", {}),
 	}
 }
 
-# policy to check cloudfront has WAF enabled
 WizPolicy[result] {
-	resource := input.document[i].resource.aws_cloudfront_distribution[name]
-	resource.enabled == true
-	not resource.web_acl_id
-
-	result := {
-		"documentId": input.document[i].id,
-		"resourceName": terraLib.get_resource_name(resource, name),
-		"searchKey": sprintf("aws_cloudfront_distribution[%s].web_acl_id", [name]),
-		"issueType": "MissingAttribute",
-		"keyExpectedValue":sprintf("aws_cloudfront_distribution[%s] has web_acl_id", [name]),
-		"keyActualValue": sprintf("aws_cloudfront_distribution[%s] does not have web_acl_id", [name]),
-		"resourceTags": object.get(resource, "tags", {}),
+	document := input.document[i]
+	lbResource := document.resource[lbResources[lb]][lbResourceName]
+	object.get(lbResource, "load_balancer_type", "application") == "application"	
+    albProtocolIsHttp(document, lbResource, lbResourceName)
+    not albRedirectHTTPS(document, lbResource, lbResourceName)
+	result := {  
+		"documentId": document.id,
+		"searchKey": sprintf("%s[%s]", [lbResources[lb], lbResourceName]),
+		"keyExpectedValue": "default_action.redirect.protocol' should be equal to 'HTTPS'",
+		"keyActualValue": "default_action.redirect.protocol' is equal to 'HTTPS'",
+		"resourceTags": object.get(lbResource, "tags", {}),
 	}
 }
+
+WizPolicy[result] {
+	document := input.document[i]
+	lbResource := document.resource[lbResources[lb]][lbResourceName]
+	object.get(lbResource, "load_balancer_type", "application") == "application"
+    albInSecureProtocols(document, lbResource, lbResourceName)
+	not albHasSSLPolicyDefined(document, lbResource, lbResourceName)
+	result := {    	
+		"documentId": document.id,
+		"searchKey": sprintf("%s[%s]", [lbResources[lb], lbResourceName]),
+		"keyExpectedValue": "All listeners with 'protocol' set to 'HTTPS' or 'TLS' must have ssl policies defined",
+		"keyActualValue": "At least one listener with 'protocol' set to 'HTTPS' or 'TLS' has ssl policy undefined",
+		"resourceTags": object.get(lbResource, "tags", {}),
+	}
+}
+
+WizPolicy[result] {
+	document := input.document[i]
+	lbResource := document.resource[lbResources[lb]][lbResourceName]
+	object.get(lbResource, "load_balancer_type", "application") == "application"	
+    albWithUnsecureSSLPolicy(document, lbResource, lbResourceName)
+    
+	result := {
+		"documentId": document.id,
+		"searchKey": sprintf("%s[%s]", [lbResources[lb], lbResourceName]),
+		"keyExpectedValue": "All listeners with 'protocol' set to 'HTTPS' or 'TLS' must use ssl policies starts with 'ELBSecurityPolicy-FS-1-2' or 'ELBSecurityPolicy-TLS-1-2' or 'ELBSecurityPolicy-TLS13'",
+		"keyActualValue": "At least one listener with 'protocol' set to 'HTTPS' or 'TLS' is not using ssl policies starting with 'ELBSecurityPolicy-FS-1-2' or 'ELBSecurityPolicy-TLS-1-2' or 'ELBSecurityPolicy-TLS13'",
+		"resourceTags": object.get(lbResource, "tags", {}),
+	}
+}
+
