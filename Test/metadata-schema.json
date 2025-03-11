@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The name of the control or policy."
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Indicates whether the policy is enabled."
+    },
+    "function_as_control": {
+      "type": "boolean",
+      "description": "Specifies if the policy functions as a control."
+    },
+    "scope_account_ids": {
+      "type": "array",
+      "description": "List of account IDs within the policy's scope.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "severity": {
+      "type": "string",
+      "description": "The severity level of the policy.",
+      "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    },
+    "target_native_types": {
+      "type": "array",
+      "description": "The target resource types for the policy.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "tags": {
+      "type": "array",
+      "description": "Metadata tags associated with the policy.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The key of the tag.",
+            "pattern": "^[a-zA-Z0-9.:=+-@ ]+$"
+          },
+          "value": {
+            "type": "string",
+            "description": "The value of the tag.",
+            "pattern": "^[a-zA-Z0-9.:=+-@ ]+$"
+          }
+        },
+        "required": ["key", "value"]
+      },
+      "minItems": 1,
+      "contains": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": ["Control-ID"]
+          },
+          "value": {
+            "type": "string",
+            "description": "The value associated with the Control-ID key."
+          }
+        },
+        "required": ["key", "value"]
+      }
+    },
+    "controlId": {
+      "type": "string",
+      "description": "The unique identifier for the control."
+    }
+  },
+  "required": [
+    "name",
+    "enabled",
+    "function_as_control",
+    "scope_account_ids",
+    "severity",
+    "target_native_types",
+    "tags",
+    "controlId"
+  ],
+  "additionalProperties": false
+}
+
