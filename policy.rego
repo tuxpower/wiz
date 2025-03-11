@@ -1,4 +1,5 @@
 # logic: "ApplicationLoadBalancer where isPublic = 'false' and listeners contain [ protocol='HTTPS' ] should have listeners contain [ securityPolicy like 'ELBSecurityPolicy-TLS-1-2-%' or securityPolicy like 'ELBSecurityPolicy-TLS13-%' or securityPolicy like 'ELBSecurityPolicy-FS-1-2-%']",
+# logic: "ApplicationLoadBalancer where isPublic = 'true' and listeners contain [ protocol='HTTPS' ] should have listeners contain [ securityPolicy like 'ELBSecurityPolicy-TLS-1-2-%' or securityPolicy like 'ELBSecurityPolicy-TLS13-%' or securityPolicy like 'ELBSecurityPolicy-FS-1-2-%']",
 package wiz
 
 import data.generic.terraform as terraLib
@@ -25,14 +26,14 @@ albProtocolIsHttp(document, lbResource, lbResourceName) {
 albRedirectMissing(document, lbResource, lbResourceName) {
 	lbListenerResource := document.resource[lbListenerResources[idx]][lbListenerName]
 	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
-	not commonLib.valid_key(lbListenerResource.default_action, "redirect")
+	not terraLib.validKey(lbListenerResource.default_action, "redirect")
 }
 
 albRedirectHTTPS(document, lbResource, lbResourceName) {
 	lbListenerResource := document.resource[lbListenerResources[idx]][lbListenerName]
 	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
-	commonLib.valid_key(lbListenerResource.default_action, "redirect")
-    commonLib.valid_key(lbListenerResource.default_action.redirect, "protocol")
+	terraLib.validKey(lbListenerResource.default_action, "redirect")
+    terraLib.validKey(lbListenerResource.default_action.redirect, "protocol")
     lbListenerResource.default_action.redirect.protocol == "HTTPS"
 }
 
@@ -45,14 +46,14 @@ albInSecureProtocols(document, lbResource, lbResourceName) {
 albHasSSLPolicyDefined(document, lbResource, lbResourceName) {
 	lbListenerResource := document.resource[lbListenerResources[i]][lbListenerName]
 	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
-	commonLib.valid_key(lbListenerResource, "ssl_policy")
+	terraLib.validKey(lbListenerResource, "ssl_policy")
 }
 
 albWithUnsecureSSLPolicy(document, lbResource, lbResourceName) {
 	lbListenerResource := document.resource[lbListenerResources[i]][lbListenerName]
 	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
 	lbListenerResource.protocol in secureProtocols
-    commonLib.valid_key(lbListenerResource, "ssl_policy")
+    terraLib.validKey(lbListenerResource, "ssl_policy")
 	sslPolicyStartsWith(lbListenerResource.ssl_policy)
     
 }
@@ -66,8 +67,8 @@ WizPolicy[result] {
 	result := {  
 		"documentId": document.id,
 		"searchKey": sprintf("%s[%s]", [lbResources[lb], lbResourceName]),
-		"keyExpectedValue": "default_action.redirect.protocol' should be equal to 'HTTPS'",
-		"keyActualValue": "default_action.redirect' is missing",
+		"keyExpectedValue": sprintf("%s[%s].default_action.redirect.protocol' should be equal to 'HTTPS'",[lbResources[lb], lbResourceName]),
+		"keyActualValue": sprintf("%s[%s].default_action.redirect.protocol' is missing",[lbResources[lb], lbResourceName]),
 		"resourceTags": object.get(lbResource, "tags", {}),
 	}
 }
