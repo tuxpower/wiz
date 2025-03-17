@@ -1,120 +1,100 @@
-# logic: "ApplicationLoadBalancer where isPublic = 'false' and listeners contain [ protocol='HTTPS' ] should have listeners contain [ securityPolicy like 'ELBSecurityPolicy-TLS-1-2-%' or securityPolicy like 'ELBSecurityPolicy-TLS13-%' or securityPolicy like 'ELBSecurityPolicy-FS-1-2-%']",
-# logic: "ApplicationLoadBalancer where isPublic = 'true' and listeners contain [ protocol='HTTPS' ] should have listeners contain [ securityPolicy like 'ELBSecurityPolicy-TLS-1-2-%' or securityPolicy like 'ELBSecurityPolicy-TLS13-%' or securityPolicy like 'ELBSecurityPolicy-FS-1-2-%']",
+# logic: "S3Bucket should not have (acl.grants contain [uri like 'http://acs.amazonaws.com/groups/global/%'] or policy.Statement contain [Effect='Allow' and (Principal='*' or Principal.AWS='*')])"
+
 package wiz
-
+import data.generic.common as common_lib
 import data.generic.terraform as terraLib
-import data.generic.common as commonLib
-import future.keywords.in
+# condition:
+# S3Bucket should not have (acl.grants contain [uri like 'http://acs.amazonaws.com/groups/global/%'] or
+# policy.Statement contain [Effect='Allow' and (Principal='*' or Principal.AWS='*')])
 
-lbResources := {"aws_lb", "aws_alb"}
-lbListenerResources := {"aws_lb_listener", "aws_alb_listener"}
+# ##################ALL PRINCIPALS#############################################
+principalKeys := {"Principal", "Principals"}
 
-secureProtocols := {"HTTPS", "TLS"}
-
-sslPolicyStartsWith(ssl_policy) {
-	not startswith(ssl_policy, "ELBSecurityPolicy-FS-1-2")
-	not startswith(ssl_policy, "ELBSecurityPolicy-TLS-1-2")
-	not startswith(ssl_policy, "ELBSecurityPolicy-TLS13")
+wildcardPrincipal(statement) {
+	common_lib.equalsOrInArray(statement[principalKeys[_]].AWS, "*")
+}{
+	common_lib.equalsOrInArray(statement[principalKeys[_]], "*")
+}{
+	common_lib.equalsOrInArray(statement[principalKeys[_]]["*"], "*")
 }
 
-albProtocolIsHttp(document, lbResource, lbResourceName) {
-	lbListenerResource := document.resource[lbListenerResources[idx]][lbListenerName]
-	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
-	lower(lbListenerResource.protocol) == "http"
+policyShouldNotAllowAllPrincipals(policy) {
+	st := common_lib.get_statement(policy)
+    statement := st[_]
+    lower(statement.Effect) == "allow"
+  	wildcardPrincipal(statement)
 }
-
-albRedirectMissing(document, lbResource, lbResourceName) {
-	lbListenerResource := document.resource[lbListenerResources[idx]][lbListenerName]
-	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
-	not terraLib.validKey(lbListenerResource.default_action, "redirect")
-}
-
-albRedirectHTTPS(document, lbResource, lbResourceName) {
-	lbListenerResource := document.resource[lbListenerResources[idx]][lbListenerName]
-	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
-	terraLib.validKey(lbListenerResource.default_action, "redirect")
-    terraLib.validKey(lbListenerResource.default_action.redirect, "protocol")
-    lbListenerResource.default_action.redirect.protocol == "HTTPS"
-}
-
-albInSecureProtocols(document, lbResource, lbResourceName) {
-	lbListenerResource := document.resource[lbListenerResources[i]][lbListenerName]
-	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
-	lbListenerResource.protocol in secureProtocols
-}
-
-albHasSSLPolicyDefined(document, lbResource, lbResourceName) {
-	lbListenerResource := document.resource[lbListenerResources[i]][lbListenerName]
-	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
-	terraLib.validKey(lbListenerResource, "ssl_policy")
-}
-
-albWithUnsecureSSLPolicy(document, lbResource, lbResourceName) {
-	lbListenerResource := document.resource[lbListenerResources[i]][lbListenerName]
-	terraLib.associatedResources(lbResource, lbListenerResource, lbResourceName, lbListenerName, null, "load_balancer_arn") 
-	lbListenerResource.protocol in secureProtocols
-    terraLib.validKey(lbListenerResource, "ssl_policy")
-	sslPolicyStartsWith(lbListenerResource.ssl_policy)
-    
+bucketPolicyShouldNotAllowAllPrincipals(document,s3Bucket, s3Name){
+	terraLib.validKey(s3Bucket, "policy")
+	policy := common_lib.json_unmarshal(s3Bucket.policy)
+    policyShouldNotAllowAllPrincipals(policy)
+} {
+# 	not terraLib.validKey(s3Bucket, "policy")
+	s3Policy := document.resource.aws_s3_bucket_policy[policyName]
+	terraLib.associatedResources(s3Bucket, s3Policy, s3Name, policyName, "bucket", "bucket")
+	terraLib.validKey(s3Policy, "policy")
+    policy := common_lib.json_unmarshal(s3Policy.policy)
+	policyShouldNotAllowAllPrincipals(policy)
 }
 
 WizPolicy[result] {
 	document := input.document[i]
-	lbResource := document.resource[lbResources[lb]][lbResourceName]
-	object.get(lbResource, "load_balancer_type", "application") == "application"	
-    albProtocolIsHttp(document, lbResource, lbResourceName)
-    albRedirectMissing(document, lbResource, lbResourceName)
-	result := {  
-		"documentId": document.id,
-		"searchKey": sprintf("%s[%s]", [lbResources[lb], lbResourceName]),
-		"keyExpectedValue": sprintf("%s[%s].default_action.redirect.protocol' should be equal to 'HTTPS'",[lbResources[lb], lbResourceName]),
-		"keyActualValue": sprintf("%s[%s].default_action.redirect.protocol' is missing",[lbResources[lb], lbResourceName]),
-		"resourceTags": object.get(lbResource, "tags", {}),
-	}
-}
-
-WizPolicy[result] {
-	document := input.document[i]
-	lbResource := document.resource[lbResources[lb]][lbResourceName]
-	object.get(lbResource, "load_balancer_type", "application") == "application"	
-    albProtocolIsHttp(document, lbResource, lbResourceName)
-    not albRedirectHTTPS(document, lbResource, lbResourceName)
-	result := {  
-		"documentId": document.id,
-		"searchKey": sprintf("%s[%s]", [lbResources[lb], lbResourceName]),
-		"keyExpectedValue": "default_action.redirect.protocol' should be equal to 'HTTPS'",
-		"keyActualValue": "default_action.redirect.protocol' is equal to 'HTTPS'",
-		"resourceTags": object.get(lbResource, "tags", {}),
-	}
-}
-
-WizPolicy[result] {
-	document := input.document[i]
-	lbResource := document.resource[lbResources[lb]][lbResourceName]
-	object.get(lbResource, "load_balancer_type", "application") == "application"
-    albInSecureProtocols(document, lbResource, lbResourceName)
-	not albHasSSLPolicyDefined(document, lbResource, lbResourceName)
-	result := {    	
-		"documentId": document.id,
-		"searchKey": sprintf("%s[%s]", [lbResources[lb], lbResourceName]),
-		"keyExpectedValue": "All listeners with 'protocol' set to 'HTTPS' or 'TLS' must have ssl policies defined",
-		"keyActualValue": "At least one listener with 'protocol' set to 'HTTPS' or 'TLS' has ssl policy undefined",
-		"resourceTags": object.get(lbResource, "tags", {}),
-	}
-}
-
-WizPolicy[result] {
-	document := input.document[i]
-	lbResource := document.resource[lbResources[lb]][lbResourceName]
-	object.get(lbResource, "load_balancer_type", "application") == "application"	
-    albWithUnsecureSSLPolicy(document, lbResource, lbResourceName)
-    
+	resource := document.resource.aws_s3_bucket[name]
+    bucketPolicyShouldNotAllowAllPrincipals(document,resource, name)
 	result := {
 		"documentId": document.id,
-		"searchKey": sprintf("%s[%s]", [lbResources[lb], lbResourceName]),
-		"keyExpectedValue": "All listeners with 'protocol' set to 'HTTPS' or 'TLS' must use ssl policies starts with 'ELBSecurityPolicy-FS-1-2' or 'ELBSecurityPolicy-TLS-1-2' or 'ELBSecurityPolicy-TLS13'",
-		"keyActualValue": "At least one listener with 'protocol' set to 'HTTPS' or 'TLS' is not using ssl policies starting with 'ELBSecurityPolicy-FS-1-2' or 'ELBSecurityPolicy-TLS-1-2' or 'ELBSecurityPolicy-TLS13'",
-		"resourceTags": object.get(lbResource, "tags", {}),
+		"resourceName": terraLib.get_resource_name(resource, name),
+		"searchKey": sprintf("aws_s3_bucket[%s]", [  name]),
+		"keyExpectedValue": sprintf("aws_s3_bucket[%s] should not allow all principals", [name]),
+		"keyActualValue": sprintf("aws_s3_bucket[%s] allows all principals", [name]),
+		"resourceTags": object.get(resource, "tags", {}),
 	}
 }
+# ##################ALL PRINCIPALS#############################################
 
+
+# ##################GLOBAL URI#############################################
+allUserURI := "http://acs.amazonaws.com/groups/global/"
+
+UriCheck(grants) {
+    startswith(lower(grants[grant].uri), allUserURI)
+}{
+	grantees := terraLib.getArray(grants[grant].grantee)
+	startswith(lower(grantees[_].uri), allUserURI)
+}
+
+aclDoesNotAllowGlobalURIOld(document, bucket, bucketName) {
+	# Support for old TF versions
+	grants := terraLib.getArray(bucket.grant)
+	UriCheck(grants)
+}
+aclDoesNotAllowGlobalURINew(document, bucket, bucketName) {
+	# Support for new TF versions
+	aclResource := document.resource.aws_s3_bucket_acl[aclName]
+	terraLib.associatedResources(bucket, aclResource, bucketName, aclName, "bucket", "bucket")
+	accessControlPolicy := terraLib.getArray(aclResource.access_control_policy)[acp]
+	grants := terraLib.getArray(accessControlPolicy.grant)
+	UriCheck(grants)
+}
+bucketACLDoesNotAllowAllUsersURI(document, s3Bucket, s3Name) {
+	# Support for old TF versions
+	aclDoesNotAllowGlobalURIOld(document, s3Bucket, s3Name)
+} {
+    aclDoesNotAllowGlobalURINew(document, s3Bucket, s3Name)
+} 
+
+WizPolicy[result] {
+	document := input.document[i]
+	resource := document.resource.aws_s3_bucket[name]
+	bucketACLDoesNotAllowAllUsersURI(document, resource, name)
+	
+	result := {
+		"documentId": document.id,
+		"resourceName": terraLib.get_resource_name(resource, name),
+		"searchKey": sprintf("aws_s3_bucket[%s]", [name]),
+		"keyExpectedValue": sprintf("aws_s3_bucket[%s] ACL should not grant global uri starts with %s", [name,allUserURI]),
+		"keyActualValue": sprintf("aws_s3_bucket[%s] ACL grants global uri starts with %s", [name, allUserURI]),
+		"resourceTags": object.get(resource, "tags", {}),
+	}
+}
+# ##################GLOBAL URI#############################################
