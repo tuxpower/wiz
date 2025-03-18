@@ -1,100 +1,42 @@
-# logic: "S3Bucket should not have (acl.grants contain [uri like 'http://acs.amazonaws.com/groups/global/%'] or policy.Statement contain [Effect='Allow' and (Principal='*' or Principal.AWS='*')])"
-
 package wiz
+
+import data.generic.terraform as terra_lib
 import data.generic.common as common_lib
-import data.generic.terraform as terraLib
-# condition:
-# S3Bucket should not have (acl.grants contain [uri like 'http://acs.amazonaws.com/groups/global/%'] or
-# policy.Statement contain [Effect='Allow' and (Principal='*' or Principal.AWS='*')])
 
-# ##################ALL PRINCIPALS#############################################
-principalKeys := {"Principal", "Principals"}
+rdsResources := {"aws_db_instance", "aws_rds_cluster_instance"}
 
-wildcardPrincipal(statement) {
-	common_lib.equalsOrInArray(statement[principalKeys[_]].AWS, "*")
-}{
-	common_lib.equalsOrInArray(statement[principalKeys[_]], "*")
-}{
-	common_lib.equalsOrInArray(statement[principalKeys[_]]["*"], "*")
-}
+WizPolicy[result] {
+	document := input.document[i]
+	rdsResource := document.resource[rdsResources[idx]][name]
+	not terra_lib.validKey(rdsResource, "publicly_accessible")
 
-policyShouldNotAllowAllPrincipals(policy) {
-	st := common_lib.get_statement(policy)
-    statement := st[_]
-    lower(statement.Effect) == "allow"
-  	wildcardPrincipal(statement)
-}
-bucketPolicyShouldNotAllowAllPrincipals(document,s3Bucket, s3Name){
-	terraLib.validKey(s3Bucket, "policy")
-	policy := common_lib.json_unmarshal(s3Bucket.policy)
-    policyShouldNotAllowAllPrincipals(policy)
-} {
-# 	not terraLib.validKey(s3Bucket, "policy")
-	s3Policy := document.resource.aws_s3_bucket_policy[policyName]
-	terraLib.associatedResources(s3Bucket, s3Policy, s3Name, policyName, "bucket", "bucket")
-	terraLib.validKey(s3Policy, "policy")
-    policy := common_lib.json_unmarshal(s3Policy.policy)
-	policyShouldNotAllowAllPrincipals(policy)
+    result := {
+		"documentId": input.document[i].id,
+		"searchKey": sprintf("%s[%s].publicly_accessible", [rdsResources[idx], name]),
+		"keyExpectedValue": sprintf("%s[%s].publicly_accessible should be defined and not null", [rdsResources[idx],name]),
+		"keyActualValue": sprintf("%s[%s].publicly_accessible is undefined or null", [rdsResources[idx], name]),
+		"resourceTags": object.get(rdsResource, "tags", {}),
+		"issueType": "MissingAttribute",
+		"remediation": "publicly_accessible = false",
+		"remediationType": "addition",
+
+	}
 }
 
 WizPolicy[result] {
 	document := input.document[i]
-	resource := document.resource.aws_s3_bucket[name]
-    bucketPolicyShouldNotAllowAllPrincipals(document,resource, name)
-	result := {
-		"documentId": document.id,
-		"resourceName": terraLib.get_resource_name(resource, name),
-		"searchKey": sprintf("aws_s3_bucket[%s]", [  name]),
-		"keyExpectedValue": sprintf("aws_s3_bucket[%s] should not allow all principals", [name]),
-		"keyActualValue": sprintf("aws_s3_bucket[%s] allows all principals", [name]),
-		"resourceTags": object.get(resource, "tags", {}),
+	rdsResource := document.resource[rdsResources[idx]][name]
+	rdsResource.publicly_accessible == true
+    result := {
+		"documentId": input.document[i].id,
+		"searchKey": sprintf("%s[%s].publicly_accessible", [rdsResources[idx], name]),
+		"keyExpectedValue": sprintf("%s[%s].publicly_accessible should be 'false'", [rdsResources[idx],name]),
+		"keyActualValue": sprintf("%s[%s].publicly_accessible is 'true'", [rdsResources[idx], name]),
+		"remediation": json.marshal({
+			"before": "true",
+			"after": "false"
+		}),
+		"remediationType": "update",
+		"resourceTags": object.get(rdsResource, "tags", {}),
 	}
 }
-# ##################ALL PRINCIPALS#############################################
-
-
-# ##################GLOBAL URI#############################################
-allUserURI := "http://acs.amazonaws.com/groups/global/"
-
-UriCheck(grants) {
-    startswith(lower(grants[grant].uri), allUserURI)
-}{
-	grantees := terraLib.getArray(grants[grant].grantee)
-	startswith(lower(grantees[_].uri), allUserURI)
-}
-
-aclDoesNotAllowGlobalURIOld(document, bucket, bucketName) {
-	# Support for old TF versions
-	grants := terraLib.getArray(bucket.grant)
-	UriCheck(grants)
-}
-aclDoesNotAllowGlobalURINew(document, bucket, bucketName) {
-	# Support for new TF versions
-	aclResource := document.resource.aws_s3_bucket_acl[aclName]
-	terraLib.associatedResources(bucket, aclResource, bucketName, aclName, "bucket", "bucket")
-	accessControlPolicy := terraLib.getArray(aclResource.access_control_policy)[acp]
-	grants := terraLib.getArray(accessControlPolicy.grant)
-	UriCheck(grants)
-}
-bucketACLDoesNotAllowAllUsersURI(document, s3Bucket, s3Name) {
-	# Support for old TF versions
-	aclDoesNotAllowGlobalURIOld(document, s3Bucket, s3Name)
-} {
-    aclDoesNotAllowGlobalURINew(document, s3Bucket, s3Name)
-} 
-
-WizPolicy[result] {
-	document := input.document[i]
-	resource := document.resource.aws_s3_bucket[name]
-	bucketACLDoesNotAllowAllUsersURI(document, resource, name)
-	
-	result := {
-		"documentId": document.id,
-		"resourceName": terraLib.get_resource_name(resource, name),
-		"searchKey": sprintf("aws_s3_bucket[%s]", [name]),
-		"keyExpectedValue": sprintf("aws_s3_bucket[%s] ACL should not grant global uri starts with %s", [name,allUserURI]),
-		"keyActualValue": sprintf("aws_s3_bucket[%s] ACL grants global uri starts with %s", [name, allUserURI]),
-		"resourceTags": object.get(resource, "tags", {}),
-	}
-}
-# ##################GLOBAL URI#############################################
