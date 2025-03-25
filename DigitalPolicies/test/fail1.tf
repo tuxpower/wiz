@@ -8,11 +8,11 @@ resource "aws_db_instance" "fail1" {
   password             = "foobarbaz"
   parameter_group_name = "default.mysql5.7"
   skip_final_snapshot  = true
-  publicly_accessible  = true
+  publicly_accessible  = false
   tags = {
     mnd-applicationid = "APP-250077"
-    mnd-owner         = "babitha.mathew@lseg.com"
+    mnd-owner         = "xxx"
     mnd-dataclassification = "restricted"
   }
-  storage_encrypted = true
+  # storage_encrypted = true
 }
