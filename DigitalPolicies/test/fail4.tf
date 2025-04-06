@@ -1,4 +1,4 @@
-resource "aws_ecs_service" "fail1" {
+resource "aws_ecs_service" "fail3" {
   name = "example"
 
   volume_configuration {
@@ -9,7 +9,7 @@ resource "aws_ecs_service" "fail1" {
       tag_specifications {
         resource_type = "volume"
         tags = {
-          mnd-dataclassification = "highlyrestricted"
+          mnd-dataclassification = "restricted"
         }
       }
     }

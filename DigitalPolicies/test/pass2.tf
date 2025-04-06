@@ -1,15 +1,15 @@
-resource "aws_ecs_service" "fail1" {
+resource "aws_ecs_service" "pass2" {
   name = "example"
 
   volume_configuration {
     name = "example"
     managed_ebs_volume {
       role_arn = aws_iam_role.example.arn
-      encrypted = false
+      encrypted = true
       tag_specifications {
         resource_type = "volume"
         tags = {
-          mnd-dataclassification = "highlyrestricted"
+          mnd-dataclassification = "restricted"
         }
       }
     }
